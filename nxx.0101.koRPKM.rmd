@@ -26,11 +26,10 @@ cDNA = read.csv("out/map.0102/cDNA_kocontigs.csv") %>% select(contigID:ko)
 gDNA = read.csv("out/map.0102/gDNA_kocontigs.csv") %>% select(contigID:ko)
 ```
 
-## Calculating RMPK
 
-###Formula
+## Implementating RPKM
 
-RPKM = (10^9 * C) / (N * L)
+$RPKM = \frac{10^{9} \times C }{n \times L}$
 
 | Variable | Description                                                            |
 | ---      | ----                                                                   |
@@ -38,7 +37,6 @@ RPKM = (10^9 * C) / (N * L)
 | N        | Total number of reads mappable to MD regions                           |
 | L        | Length of the MD Region                                                |
 
-### Implementation of RPKM
 
 ```{r rpkm-func, echo=TRUE}
 #Fxn for calculating RPKM based on the above
@@ -46,7 +44,7 @@ rpkm       =  function(count, allcount, length) {
     #change to numeric (bit size too small for integers)
     count     %<>%  as.numeric
     allcount  %<>%  as.numeric
-    length    %<>%  as.numeric(length)
+    length    %<>%  as.numeric
     (10^9 * count) / (allcount* length)
 }
 ```
@@ -76,6 +74,10 @@ save(allKODF, "out/nxx.0101.in.rda")
 load("nxx.0101.in.rda")
 ```
 
+```{r}
+kotable %<>% mutate(fullName = paste(ko, koname.ko..ko.definition, sep=" - ")) %>% select(ko, fullName)
+```
+
 ```{r plot1, warning=FALSE, eval=TRUE}
 qplot(rpkm_cDNA, rpkm_gDNA, geom=c("point"), data=allKODF, alpha=0.2)     +
 scale_x_log10()                                                           +
@@ -100,7 +102,7 @@ allKODF %>% ggvis(~log10(rpkm_gDNA)) %>%  layer_densities() %>% set_options(widt
 ```{r app}
 shinyApp(
 ui = bootstrapPage(
-               selectInput("ko", "Choose a ko:", choices = unique(as.character(allKODF$ko)), selected = allKODF$ko[1]),
+               selectInput("ko", "Choose a ko:", choices = kotable$fullName, selected = allKODF$ko[1], width="100%"),
                checkboxInput("toLog", "log10", value = TRUE),
  tags$table(
     tags$td(ggvisOutput("Everything")),
@@ -110,7 +112,8 @@ ui = bootstrapPage(
 server = function(input, output){
 
     chosenKO = reactive({
-    allKODF %<>% filter(ko==input$ko)
+        koID = substr(start=1, stop=6, x=input$ko)
+    allKODF %<>% filter(ko==koID)
     if(input$toLog){
         allKODF$rpkm_cDNA %<>% log10    #taking log creates -Inf
         allKODF$rpkm_gDNA %<>% log10
