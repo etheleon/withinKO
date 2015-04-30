@@ -1,0 +1,159 @@
+---
+title: "Investigation Genomic Content vs Expression of Contigs Across KOs"
+date: April 29, 2015
+author: Wesley GOI
+runtime: shiny
+output: html_document
+---
+
+```{r lib, echo=FALSE, message=FALSE, warning=FALSE}
+library(magrittr)
+library(knitr)
+library(ggplot2)
+library(shiny)
+library(dplyr)
+library(ggvis)
+theme_set(theme_bw())
+```
+
+```{r settings, echo=FALSE}
+opts_chunk$set(echo=FALSE)
+```
+
+```{r readData, eval=FALSE}
+#reads in data
+cDNA = read.csv("out/map.0102/cDNA_kocontigs.csv") %>% select(contigID:ko)
+gDNA = read.csv("out/map.0102/gDNA_kocontigs.csv") %>% select(contigID:ko)
+```
+
+## Calculating RMPK
+
+###Formula
+
+RPKM = (10^9 * C) / (N * L)
+
+| Variable | Description                                                            |
+| ---      | ----                                                                   |
+| C        | number of reads mappable to the Max Diversity (MD) Region (Using Blat) |
+| N        | Total number of reads mappable to MD regions                           |
+| L        | Length of the MD Region                                                |
+
+### Implementation of RPKM
+
+```{r rpkm-func, echo=TRUE}
+#Fxn for calculating RPKM based on the above
+rpkm       =  function(count, allcount, length) {
+    #change to numeric (bit size too small for integers)
+    count     %<>%  as.numeric
+    allcount  %<>%  as.numeric
+    length    %<>%  as.numeric(length)
+    (10^9 * count) / (allcount* length)
+}
+```
+
+```{r addRpkm, eval=FALSE}
+#Introduce new RPKM columns
+cDNA$rpkm   =   with(cDNA, rpkm(Freq, sum(Freq), length))   #na.omit %>% log10 %>% txtdensity
+gDNA$rpkm    =   with(gDNA, rpkm(Freq, sum(Freq), length))  #na.omit %>% log10 %>% txtdensity
+```
+
+## 1. All Contigs, All KOs
+
+```{r allKO, eval=FALSE}
+#All in one
+allKODF = merge(
+      by = c("ko","contigName", "ko"),
+      cDNA %>% select(-type, -length, -contigID),
+      gDNA %>% select(-type, -length, -contigID),
+      suffixes = c("_cDNA", "_gDNA"),
+      all=T
+)
+allKODF[is.na(allKODF)] = 0
+save(allKODF, "out/nxx.0101.in.rda")
+```
+
+```{r loadRDA}
+load("nxx.0101.in.rda")
+```
+
+```{r plot1, warning=FALSE, eval=FALSE}
+qplot(rpkm_cDNA, rpkm_gDNA, geom=c("point"), data=allKODF, alpha=0.2)     +
+scale_x_log10()                                                           +
+scale_y_log10()                                                           +
+ggtitle("Comparison of read abundances (rpkm) of All Contigs in All KOs")+ 
+theme(legend.position="none")
+```
+
+#### Log10 Distribution of normalised (rpkm) mappable cDNA reads (Expression) to all KO Contigs
+```{r plot2, warning=FALSE}
+allKODF %>% ggvis(~log10(rpkm_cDNA)) %>%  layer_densities() %>% set_options(width=150, height=100)
+```
+
+#### Log10 Distribution of normalised (rpkm) mappable gDNA reads (Genomic) to all KO Contigs
+```{r plot3, warning=FALSE}
+allKODF %>% ggvis(~log10(rpkm_gDNA)) %>%  layer_densities() %>% set_options(width=150, height=100)
+#qplot(log10(rpkm_gDNA), data=allKODF, geom="density")+ ggtitle("gDNA")
+```
+
+## 2. Partitioned by KO
+
+```{r something, cache=FALSE}
+selectInput("ko", "Choose a ko:", choices = unique(as.character(allKODF$ko)), selected = allKODF$ko[1])
+checkboxInput("toLog", "log10", value = TRUE)
+```
+
+```{r reactives, cache=FALSE}
+chosenKO = reactive({ 
+    allKODF %<>% filter(ko==input$ko) 
+    toLog = input$toLog
+    if(toLog){
+        allKODF$rpkm_cDNA %<>% log10    #taking log creates -Inf
+        allKODF$rpkm_gDNA %<>% log10
+        allKODF
+    }else{
+        allKODF
+    }
+  })
+
+koDF = reactive({
+    if(input$toLog){
+        chosenKO() %>% filter(rpkm_cDNA != -Inf, rpkm_gDNA != -Inf)
+    }else{
+        chosenKO()
+    }
+})
+
+thedf = reactive({
+    if(input$toLog){
+            chosenKO() %>% mutate(isExpressed=ifelse(rpkm_cDNA ==- Inf,"no","yes")) #%>%
+    }else{
+            chosenKO() %>% mutate(isExpressed=ifelse(rpkm_cDNA == 0,"no","yes")) #%>%
+    }
+})
+
+theTitle = reactive({
+  toLog = input$toLog
+ifelse(toLog,
+"gDNA Rpkm distribution (contigs without observable expression)",
+"gDNA Rpkm distribution")
+})
+```
+
+```{r reactivePlot, cache=FALSE}
+#renderPlot({qplot(rpkm_cDNA, rpkm_gDNA, data=koDF()) })
+    koDF %>% ggvis(~rpkm_cDNA, ~rpkm_gDNA) %>% layer_points()
+```
+
+```{r}
+renderText(theTitle())
+```
+
+```{r warning=FALSE,message=FALSE}
+    thedf %>% ggvis(~rpkm_gDNA, fill=~isExpressed) %>%
+    group_by(isExpressed) %>%
+    layer_histograms()
+```
+
+```{r sessionInfo}
+sessionInfo()
+```
